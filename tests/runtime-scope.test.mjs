@@ -31,7 +31,7 @@ test("runtime package path points only to the published distribution directory",
 });
 
 test("service worker precaches only app-shell and published package URLs", () => {
-  assert.match(serviceWorker, /edubrief-shell-v1\.2\.1-standalone/);
+  assert.match(serviceWorker, /edubrief-shell-v1\.2\.2-navigation-labels/);
   assert.match(serviceWorker, /navigation\.mjs/);
   assert.match(serviceWorker, /content\/foundation-weeks/);
   assert.doesNotMatch(serviceWorker, /content-candidates|review-bundle|fundus|node_modules/i);
@@ -70,7 +70,13 @@ test("app contains no quiz, answer, scoring, or self-assessment controls", () =>
 });
 
 test("responsive navigation exposes only the active product areas", () => {
-  for (const label of ["Heute", "Sammlung", "Einstellungen"]) assert.match(script, new RegExp(`>${label}<`));
+  for (const navigationClass of ["desktop-nav__link", "mobile-nav__link"]) {
+    for (const label of ["Heute", "Themenwochen", "Meine Sammlung", "Einstellungen"]) {
+      assert.match(script, new RegExp(`class="${navigationClass}"[^>]*>${label}<`));
+    }
+  }
+  assert.match(script, /<h1 tabindex="-1">Dein EduCoffee für heute<\/h1>/);
+  assert.doesNotMatch(script, />Heute – EduCoffee<|>Themenwoche<|>Sammlung</);
   for (const obsolete of ["Kalender", "Entdecken", "Mein Lernen", "Mehr"]) assert.doesNotMatch(script, new RegExp(`>${obsolete}<`));
   assert.doesNotMatch(script, /aria-haspopup=\"menu\"/);
 });

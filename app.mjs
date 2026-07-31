@@ -99,8 +99,8 @@ function routeFromHash() {
 
 function routeTitle(route) {
   return {
-    today: "Heute – EduCoffee",
-    week: "Themenwoche",
+    today: "Heute",
+    week: "Themenwochen",
     collection: "Meine Sammlung",
     settings: "Einstellungen",
     data: "Daten",
@@ -286,8 +286,8 @@ function renderShell({ focusHeading = false } = {}) {
           <span>EduBrief</span>
         </a>
         <nav class="desktop-nav" aria-label="Hauptnavigation">
-          <a class="desktop-nav__link" href="#today"${activeAttribute("today")}>Heute – EduCoffee</a>
-          <a class="desktop-nav__link" href="#week" data-action="show-week-overview"${activeAttribute("week")}>Themenwoche</a>
+          <a class="desktop-nav__link" href="#today"${activeAttribute("today")}>Heute</a>
+          <a class="desktop-nav__link" href="#week" data-action="show-week-overview"${activeAttribute("week")}>Themenwochen</a>
           <a class="desktop-nav__link" href="#collection"${activeAttribute("collection")}>Meine Sammlung</a>
           <a class="desktop-nav__link" href="#settings"${activeAttribute("settings")}>Einstellungen</a>
         </nav>
@@ -295,9 +295,9 @@ function renderShell({ focusHeading = false } = {}) {
     </header>
     <main id="main-content" class="app-main route-view" tabindex="-1">${routeMarkup()}</main>
     <nav class="mobile-nav" aria-label="Hauptnavigation">
-      <a class="mobile-nav__link" href="#today" aria-label="Heute – EduCoffee"${activeAttribute("today")}>Heute</a>
-      <a class="mobile-nav__link" href="#week" aria-label="Themenwoche" data-action="show-week-overview"${activeAttribute("week")}>Themenwoche</a>
-      <a class="mobile-nav__link" href="#collection" aria-label="Meine Sammlung"${activeAttribute("collection")}>Sammlung</a>
+      <a class="mobile-nav__link" href="#today"${activeAttribute("today")}>Heute</a>
+      <a class="mobile-nav__link" href="#week" data-action="show-week-overview"${activeAttribute("week")}>Themenwochen</a>
+      <a class="mobile-nav__link" href="#collection"${activeAttribute("collection")}>Meine Sammlung</a>
       <a class="mobile-nav__link" href="#settings" aria-label="Einstellungen"${activeAttribute("settings")}>Einstellungen</a>
     </nav>`;
   if (focusHeading) document.querySelector("#main-content h1")?.focus?.();
@@ -494,7 +494,7 @@ function todayMarkup() {
     return `
       <section>
         <p class="section-kicker">Heute · ${escapeHtml(formatLocalDate(today))}</p>
-        <h1 tabindex="-1">Dein EduCoffee ist bereit</h1>
+        <h1 tabindex="-1">Dein EduCoffee für heute</h1>
         <p class="intro">Ein kurzer Forschungs- und Praxisimpuls für deinen aktiven Tag.</p>
       </section>
       <section class="card card--accent">
