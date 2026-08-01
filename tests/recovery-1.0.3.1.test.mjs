@@ -105,9 +105,10 @@ test("legacy implementation IDs migrate losslessly and deduplicate against the n
   assert.equal(migration.puts[0].wantToTryAt, "2026-01-02T10:00:00.000Z");
 });
 
-test("regular app has no QA profile shortcut and keeps collection updates reactive", () => {
+test("regular app has no QA profile shortcut and keeps card collection updates reactive", () => {
   assert.doesNotMatch(script, /qa-profile|hidden-profile|mock-profile/i);
   assert.match(script, /await refreshPersonalState\(target\.dataset\.contentId\)/);
-  assert.match(script, /state\.savedImplementations = await setImplementationSaved/);
-  assert.match(script, /if \(action === "remove-saved-implementation"\)[\s\S]*await refreshPersonalState\(target\.dataset\.contentId\)/);
+  assert.match(script, /await setCardSaved/);
+  assert.match(script, /if \(action === "remove-saved-card"\)[\s\S]*await refreshPersonalState\(target\.dataset\.contentId\)/);
+  assert.doesNotMatch(script, /migrateImplementationSavesToCards/);
 });

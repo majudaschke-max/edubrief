@@ -401,6 +401,76 @@ export async function setImplementationSaved(database, { profileId, contentId, i
   return getSavedImplementations(database, profileId);
 }
 
+function cardSavePlanId(profileId, contentId) {
+  return `${profileId}::card::${contentId}`;
+}
+
+function savedAtForPlan(plan) {
+  return plan.wantToTryAt ?? plan.savedAt ?? plan.createdAt;
+}
+
+function isSavedCardPlan(plan, profileId, contentId = null) {
+  return plan.profileId === profileId
+    && (!contentId || plan.contentId === contentId)
+    && Boolean(plan.contentId)
+    && (plan.savedEntityType === "educoffee-card" || Boolean(plan.implementationId));
+}
+
+export async function getCardSaveState(database, profileId, contentId) {
+  const transaction = database.transaction("practicePlans", "readonly");
+  const records = await requestToPromise(transaction.objectStore("practicePlans").index("contentId").getAll(contentId));
+  await transactionToPromise(transaction);
+  const saved = records
+    .filter((item) => isSavedCardPlan(item, profileId, contentId))
+    .map((item) => ({ ...item, savedAt: savedAtForPlan(item) }))
+    .sort((a, b) => String(b.savedAt).localeCompare(String(a.savedAt)))[0];
+  return saved ? { ...saved, contentId } : null;
+}
+
+export async function getSavedCards(database, profileId) {
+  const transaction = database.transaction("practicePlans", "readonly");
+  const records = await requestToPromise(transaction.objectStore("practicePlans").index("profileId").getAll(profileId));
+  await transactionToPromise(transaction);
+  const byContentId = new Map();
+  for (const record of records.filter((item) => isSavedCardPlan(item, profileId))) {
+    const candidate = { ...record, savedAt: savedAtForPlan(record) };
+    const existing = byContentId.get(record.contentId);
+    if (!existing || String(candidate.savedAt).localeCompare(String(existing.savedAt)) > 0) {
+      byContentId.set(record.contentId, candidate);
+    }
+  }
+  return [...byContentId.values()]
+    .sort((a, b) => String(b.savedAt).localeCompare(String(a.savedAt)) || a.contentId.localeCompare(b.contentId));
+}
+
+export async function setCardSaved(database, { profileId, contentId, weekId, enabled, now }) {
+  const planId = cardSavePlanId(profileId, contentId);
+  const transaction = database.transaction("practicePlans", "readwrite");
+  const store = transaction.objectStore("practicePlans");
+  const existingPlans = await requestToPromise(store.index("contentId").getAll(contentId));
+  if (enabled) {
+    const existing = existingPlans.find((item) => item.planId === planId);
+    store.put({
+      ...(existing ?? {}),
+      planId,
+      profileId,
+      contentId,
+      weekId,
+      savedEntityType: "educoffee-card",
+      wantToTryAt: existing?.wantToTryAt ?? existing?.savedAt ?? now,
+      status: "planned",
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    });
+  } else {
+    for (const plan of existingPlans.filter((item) => isSavedCardPlan(item, profileId, contentId))) {
+      store.delete(plan.planId);
+    }
+  }
+  await transactionToPromise(transaction);
+  return getSavedCards(database, profileId);
+}
+
 export function planUnifiedImplementationMarks(plans, experiences, profileId, now = new Date().toISOString()) {
   const relevantPlans = plans.filter((item) => item.profileId === profileId && item.implementationId && item.contentId);
   const relevantExperiences = experiences.filter((item) => item.profileId === profileId && item.implementationId && item.contentId);

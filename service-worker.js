@@ -1,4 +1,4 @@
-const CACHE_NAME = "edubrief-shell-v1.2.2-navigation-labels";
+const CACHE_NAME = "edubrief-shell-v1.2.3-single-card-save";
 const APP_BASE = new URL("./", self.location.href);
 const CONTENT_BASE = new URL("./content/foundation-weeks/", APP_BASE);
 const PRECACHE_URLS = [

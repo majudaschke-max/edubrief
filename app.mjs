@@ -1,10 +1,10 @@
 import {
   appendProgressAssignments,
   completeOnboarding,
-  getSavedImplementations,
-  getImplementationStates,
   getActiveProfile,
+  getCardSaveState,
   getProgressForProfile,
+  getSavedCards,
   installContentPackage,
   loadInstalledPackage,
   migrateCardPracticeMarks,
@@ -13,7 +13,7 @@ import {
   migrateUnifiedImplementationMarks,
   openDatabase,
   openEduCoffee,
-  setImplementationSaved,
+  setCardSaved,
   verifyStorage,
 } from "./db.mjs";
 import { ContentPackageError, loadPublishedPackage } from "./content-loader.mjs";
@@ -49,8 +49,8 @@ const state = {
   profile: null,
   calendar: null,
   progress: [],
-  implementationStates: {},
-  savedImplementations: [],
+  cardSaveState: null,
+  savedCards: [],
   collectionTarget: null,
   weekSelection: null,
   weekTarget: null,
@@ -393,20 +393,26 @@ function weekMarkup() {
 }
 
 function collectionMarkup() {
-  const items = state.savedImplementations.map((record) => {
+  const items = state.savedCards.map((record) => {
     const card = state.package.content.cards.find((item) => item.id === record.contentId);
-    const implementation = card ? normalizeImplementations(card).find((item) => item.implementationId === record.implementationId) : null;
-    if (!card || !implementation) return "";
+    if (!card) return "";
+    const implementations = normalizeImplementations(card);
     const topic = state.package.content.topics.find((item) => item.topicId === card.topicId);
-    const subjectLabel = implementationSubjectLabel(implementation);
-    return `<article class="card collection-item" data-implementation-id="${escapeHtml(implementation.implementationId)}" aria-labelledby="collection-${escapeHtml(implementation.implementationId)}-title">
-      ${subjectLabel ? `<p class="status-badge">${escapeHtml(subjectLabel)}</p>` : ""}
-      <h2 class="card__title" id="collection-${escapeHtml(implementation.implementationId)}-title">${escapeHtml(implementation.title)}</h2>
-      <p class="collection-item__origin">${escapeHtml(topic?.title ?? "EduBrief")} · ${escapeHtml(card.title)}</p>
-      <p class="card__description">${escapeHtml(implementation.learningAction)}</p>
+    const week = state.package.content.themeWeeks.find((item) => item.weekId === card.themeWeekId);
+    return `<article class="card collection-item" data-card-id="${escapeHtml(card.id)}" aria-labelledby="collection-${escapeHtml(card.id)}-title">
+      <p class="section-kicker">${escapeHtml(topic?.title ?? "EduBrief")} · ${escapeHtml(week?.title ?? "Themenwoche")}</p>
+      <h2 class="card__title" id="collection-${escapeHtml(card.id)}-title">${escapeHtml(card.title)}</h2>
+      <p class="collection-item__origin">Schritt ${escapeHtml(card.sequence)} von 5</p>
+      <div class="implementation-list collection-item__implementations" aria-label="Drei mögliche Umsetzungen">
+        ${implementations.map((implementation) => implementationMarkup(implementation)).join("")}
+      </div>
+      <div class="content-block">
+        <h3>Wissenschaftlicher Kontext</h3>
+        <p>${escapeHtml(card.researchStatement.robustCore)}</p>
+      </div>
       <div class="button-row">
-        <button class="button button--secondary" type="button" data-action="open-collection-origin" data-content-id="${escapeHtml(card.id)}" data-implementation-id="${escapeHtml(implementation.implementationId)}">Ursprung öffnen</button>
-        <button class="button button--text" type="button" data-action="remove-saved-implementation" data-content-id="${escapeHtml(card.id)}" data-implementation-id="${escapeHtml(implementation.implementationId)}">Aus Sammlung entfernen</button>
+        <button class="button button--secondary" type="button" data-action="open-collection-origin" data-content-id="${escapeHtml(card.id)}">Ursprung öffnen</button>
+        <button class="button button--text" type="button" data-action="remove-saved-card" data-content-id="${escapeHtml(card.id)}" data-week-id="${escapeHtml(card.themeWeekId)}">Aus Sammlung entfernen</button>
       </div>
     </article>`;
   }).filter(Boolean);
@@ -417,7 +423,7 @@ function collectionMarkup() {
     ${state.notice ? `<div class="feedback feedback--success" role="status"><p>${escapeHtml(state.notice)}</p></div>` : ""}
     ${items.length
       ? `<div class="collection-list">${items.join("")}</div>`
-      : `<div class="card empty-state"><p class="card__description">Du hast noch keine Umsetzung vorgemerkt.</p><a class="button button--primary" href="#today">Zu Heute</a></div>`}
+      : `<div class="card empty-state"><p class="card__description">Du hast noch keinen EduCoffee vorgemerkt.</p><a class="button button--primary" href="#today">Zu Heute</a></div>`}
   </section>`;
 }
 
@@ -448,7 +454,7 @@ function todayMarkup() {
     const week = card ? state.package.content.themeWeeks.find((item) => item.weekId === card.themeWeekId) : null;
     const topic = card ? state.package.content.topics.find((item) => item.topicId === card.topicId) : null;
     if (card && week && topic) {
-      return `<div class="collection-origin-bar"><button class="button button--text" type="button" data-action="close-collection-origin">Zurück zu Meine Sammlung</button></div>${eduCoffeeMarkup(card, week, topic, { focusImplementationId: state.collectionTarget.implementationId })}`;
+      return `<div class="collection-origin-bar"><button class="button button--text" type="button" data-action="close-collection-origin">Zurück zu Meine Sammlung</button></div>${eduCoffeeMarkup(card, week, topic)}`;
     }
     state.collectionTarget = null;
   }
@@ -509,13 +515,10 @@ function todayMarkup() {
   return eduCoffeeMarkup(card, week, topic);
 }
 
-function eduCoffeeMarkup(card, week, topic, { focusImplementationId = null } = {}) {
+function eduCoffeeMarkup(card, week, topic) {
   const selection = subjectSelectionFromProfile(state.profile);
-  let implementations = selectImplementations(card, selection);
-  if (focusImplementationId && !implementations.some((item) => item.implementationId === focusImplementationId)) {
-    const target = normalizeImplementations(card).find((item) => item.implementationId === focusImplementationId);
-    if (target) implementations = [target, ...implementations.filter((item) => item.implementationId !== focusImplementationId)].slice(0, 3);
-  }
+  const implementations = selectImplementations(card, selection);
+  const cardSaved = state.cardSaveState?.contentId === card.id && Boolean(state.cardSaveState.savedAt);
   const sourceMap = new Map(state.package.content.sources.map((source) => [source.sourceId, source]));
   const sources = card.researchStatement.sourceRefs.map((id) => sourceMap.get(id)).filter(Boolean);
   const limits = card.researchStatement.conditionsAndLimits.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
@@ -528,6 +531,9 @@ function eduCoffeeMarkup(card, week, topic, { focusImplementationId = null } = {
       return `<li>${escapeHtml(source.citation)}</li>`;
     })
     .join("");
+  const cardSaveMarkup = `<div class="card-save-action">
+      <button class="button action-toggle" type="button" aria-pressed="${cardSaved}" aria-label="Zum Ausprobieren merken${cardSaved ? ", in Meine Sammlung gespeichert" : ""}" data-action="toggle-card-saved" data-content-id="${escapeHtml(card.id)}" data-week-id="${escapeHtml(card.themeWeekId)}">${cardSaved ? '<span aria-hidden="true">✓ </span>' : ""}Zum Ausprobieren merken</button>
+    </div>`;
   const implementationsMarkup = implementations.length
     ? `<section class="card implementations" aria-labelledby="implementations-heading">
         <div class="implementations__header">
@@ -535,7 +541,7 @@ function eduCoffeeMarkup(card, week, topic, { focusImplementationId = null } = {
           <h2 class="section-heading" id="implementations-heading">Mögliche Umsetzungen</h2>
           <p>Wähle, was zu deinem Fach, deiner Lerngruppe und deinem Lernziel passt.</p>
         </div>
-        <div class="implementation-list">${implementations.map((item) => implementationMarkup(item, card.id, item.implementationId === focusImplementationId)).join("")}</div>
+        <div class="implementation-list">${implementations.map((item) => implementationMarkup(item)).join("")}</div>
       </section>`
     : "";
 
@@ -575,6 +581,7 @@ function eduCoffeeMarkup(card, week, topic, { focusImplementationId = null } = {
             <h3 class="science-subheading">Was daraus nicht folgt</h3>
             <ul class="science-list">${doesNotFollow}</ul>
           </div>
+          ${cardSaveMarkup}
           <div class="science-section">
             <h3 class="science-subheading">Geprüfte Quellen</h3>
             <ol class="source-list">${sourceItems}</ol>
@@ -589,27 +596,22 @@ function eduCoffeeMarkup(card, week, topic, { focusImplementationId = null } = {
     </article>`;
 }
 
-function implementationMarkup(item, contentId, focused = false) {
-  const personal = state.implementationStates[item.implementationId] ?? {};
-  const saved = Boolean(personal.savedAt);
+function implementationMarkup(item) {
   const subjectLabel = implementationSubjectLabel(item);
   return `
     <article class="implementation-card" data-implementation-id="${escapeHtml(item.implementationId)}" aria-labelledby="${escapeHtml(item.implementationId)}-title">
       ${subjectLabel ? `<p class="status-badge">${escapeHtml(subjectLabel)}</p>` : ""}
-      <h3 class="card__title" id="${escapeHtml(item.implementationId)}-title"${focused ? ' tabindex="-1"' : ""}>${escapeHtml(item.title)}</h3>
+      <h3 class="card__title" id="${escapeHtml(item.implementationId)}-title">${escapeHtml(item.title)}</h3>
       <p class="card__description">${escapeHtml(item.learningAction)}</p>
       ${item.observationPrompt ? `<div class="content-block"><h4>Worauf du achten kannst</h4><p>${escapeHtml(item.observationPrompt)}</p></div>` : ""}
       ${item.variation ? `<div class="implementation-variation"><p><strong>Mögliche Abwandlung:</strong> ${escapeHtml(item.variation)}</p></div>` : ""}
-      <div class="implementation-actions">
-        <button class="button action-toggle" type="button" aria-pressed="${saved}" aria-label="Zum Ausprobieren merken${saved ? ", in Meine Sammlung gespeichert" : ""}" data-action="toggle-implementation-saved" data-content-id="${escapeHtml(contentId)}" data-implementation-id="${escapeHtml(item.implementationId)}">${saved ? '<span aria-hidden="true">✓ </span>' : ""}Zum Ausprobieren merken</button>
-      </div>
     </article>`;
 }
 
 async function refreshPersonalState(contentId) {
   state.progress = await getProgressForProfile(state.database, state.profile.profileId);
-  state.implementationStates = contentId ? await getImplementationStates(state.database, state.profile.profileId, contentId) : {};
-  state.savedImplementations = await getSavedImplementations(state.database, state.profile.profileId);
+  state.cardSaveState = contentId ? await getCardSaveState(state.database, state.profile.profileId, contentId) : null;
+  state.savedCards = await getSavedCards(state.database, state.profile.profileId);
 }
 
 async function finishOnboarding() {
@@ -756,35 +758,34 @@ async function handleClick(event) {
     }
     return;
   }
-  if (action === "toggle-implementation-saved") {
-    const implementationId = target.dataset.implementationId;
+  if (action === "toggle-card-saved") {
+    const contentId = target.dataset.contentId;
     try {
-      const current = Boolean(state.implementationStates[implementationId]?.savedAt);
-      state.savedImplementations = await setImplementationSaved(state.database, {
+      const current = state.cardSaveState?.contentId === contentId && Boolean(state.cardSaveState.savedAt);
+      await setCardSaved(state.database, {
         profileId: state.profile.profileId,
-        contentId: target.dataset.contentId,
-        implementationId,
+        contentId,
+        weekId: target.dataset.weekId,
         enabled: !current,
         now: new Date().toISOString(),
       });
-      await refreshPersonalState(target.dataset.contentId);
+      await refreshPersonalState(contentId);
       state.notice = current ? "Aus Meine Sammlung entfernt." : "In Meine Sammlung gespeichert.";
       renderShell();
-      document.querySelector(`[data-implementation-id="${CSS.escape(implementationId)}"] [data-action="toggle-implementation-saved"]`)?.focus();
+      document.querySelector(`[data-action="toggle-card-saved"][data-content-id="${CSS.escape(contentId)}"]`)?.focus();
     } catch (error) {
-      state.notice = "Die Umsetzung wurde nicht gespeichert. Der vorherige Zustand bleibt bestehen.";
+      state.notice = "Der EduCoffee wurde nicht gespeichert. Der vorherige Zustand bleibt bestehen.";
       renderShell();
       console.error(error);
     }
     return;
   }
-  if (action === "remove-saved-implementation") {
-    const implementationId = target.dataset.implementationId;
+  if (action === "remove-saved-card") {
     try {
-      state.savedImplementations = await setImplementationSaved(state.database, {
+      await setCardSaved(state.database, {
         profileId: state.profile.profileId,
         contentId: target.dataset.contentId,
-        implementationId,
+        weekId: target.dataset.weekId,
         enabled: false,
         now: new Date().toISOString(),
       });
@@ -793,20 +794,20 @@ async function handleClick(event) {
       renderShell();
       document.querySelector("#collection-heading")?.focus();
     } catch (error) {
-      state.notice = "Die Umsetzung konnte nicht entfernt werden. Der vorherige Zustand bleibt bestehen.";
+      state.notice = "Der EduCoffee konnte nicht entfernt werden. Der vorherige Zustand bleibt bestehen.";
       renderShell();
       console.error(error);
     }
     return;
   }
   if (action === "open-collection-origin") {
-    state.collectionTarget = { contentId: target.dataset.contentId, implementationId: target.dataset.implementationId };
+    state.collectionTarget = { contentId: target.dataset.contentId };
     state.weekTarget = null;
     await refreshPersonalState(target.dataset.contentId);
     state.route = "today";
     location.hash = "today";
     renderShell();
-    document.querySelector(`[data-implementation-id="${CSS.escape(target.dataset.implementationId)}"] h3`)?.focus();
+    document.querySelector("#coffee-title")?.focus();
     return;
   }
   if (action === "close-collection-origin") {
@@ -970,7 +971,7 @@ async function start() {
       await appendProgressAssignments(state.database, missingAssignments);
       state.progress = await getProgressForProfile(state.database, state.profile.profileId);
     }
-    state.savedImplementations = await getSavedImplementations(state.database, state.profile.profileId);
+    state.savedCards = await getSavedCards(state.database, state.profile.profileId);
     state.route = routeFromHash();
     const todayAssignment = state.progress.find((record) => record.scheduledActiveDate === currentDateOnly());
     if (todayAssignment) await refreshPersonalState(todayAssignment.contentId);

@@ -2,18 +2,20 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { CONTENT_STORES, DB_NAME, DB_VERSION, PERSONAL_STORES } from "../db.mjs";
+import { CONTENT_STORES, DB_NAME, DB_VERSION, PERSONAL_SCHEMA_VERSION, PERSONAL_STORES } from "../db.mjs";
 import { PACKAGE_BASE } from "../domain.mjs";
 
 const appDirectory = fileURLToPath(new URL("../", import.meta.url));
 const html = await readFile(`${appDirectory}index.html`, "utf8");
 const script = await readFile(`${appDirectory}app.mjs`, "utf8");
+const databaseScript = await readFile(`${appDirectory}db.mjs`, "utf8");
 const styles = await readFile(`${appDirectory}styles.css`, "utf8");
 const serviceWorker = await readFile(`${appDirectory}service-worker.js`, "utf8");
 
 test("IndexedDB name and explicit version match the architecture contract", () => {
   assert.equal(DB_NAME, "edubrief");
   assert.equal(DB_VERSION, 1);
+  assert.equal(PERSONAL_SCHEMA_VERSION, "1.2.0-foundation-collection");
 });
 
 test("content and personal object stores are separated", () => {
@@ -31,7 +33,7 @@ test("runtime package path points only to the published distribution directory",
 });
 
 test("service worker precaches only app-shell and published package URLs", () => {
-  assert.match(serviceWorker, /edubrief-shell-v1\.2\.2-navigation-labels/);
+  assert.match(serviceWorker, /edubrief-shell-v1\.2\.3-single-card-save/);
   assert.match(serviceWorker, /navigation\.mjs/);
   assert.match(serviceWorker, /content\/foundation-weeks/);
   assert.doesNotMatch(serviceWorker, /content-candidates|review-bundle|fundus|node_modules/i);
@@ -94,15 +96,34 @@ test("subject onboarding uses accessible native checkboxes and an exclusive gene
   assert.match(styles, /\.subject-choice[\s\S]*min-height:\s*var\(--touch-target-min\)/);
 });
 
-test("possible implementations are equal and expose one implementation-level collection toggle", () => {
+test("each EduCoffee renders three implementations and one card-level save action immediately before sources", () => {
   assert.match(script, /Mögliche Umsetzungen/);
   assert.match(script, /data-implementation-id/);
-  assert.match(script, /toggle-implementation-saved/);
-  assert.match(script, /aria-pressed="\$\{saved\}"/);
+  assert.match(script, /const implementations = selectImplementations\(card, selection\)/);
+  assert.match(script, /implementations\.map\(\(item\) => implementationMarkup\(item\)\)/);
+  assert.equal(script.match(/<button[^>]+data-action="toggle-card-saved"/g)?.length, 1);
+  assert.match(script, /aria-pressed="\$\{cardSaved\}"/);
   assert.match(script, /Zum Ausprobieren merken/);
+  assert.doesNotMatch(script, /toggle-implementation-saved/);
   assert.doesNotMatch(script, /toggle-implementation-mark|Ausprobiert/);
   assert.doesNotMatch(script, /Heute im Unterricht|Weitere Ideen|Vorbereitung|Unterrichtszeit/);
   assert.match(styles, /\.implementation-list/);
+  const implementationRenderer = script.slice(script.indexOf("function implementationMarkup"), script.indexOf("async function refreshPersonalState"));
+  assert.doesNotMatch(implementationRenderer, /Zum Ausprobieren merken|data-action=/);
+  const coffeeTemplate = script.slice(script.indexOf("<article class=\"educoffee\""), script.indexOf("function implementationMarkup"));
+  assert.equal(coffeeTemplate.match(/\$\{cardSaveMarkup\}/g)?.length, 1);
+  assert.match(coffeeTemplate, /Was daraus nicht folgt[\s\S]*\$\{cardSaveMarkup\}\s*<div class="science-section">\s*<h3 class="science-subheading">Geprüfte Quellen<\/h3>/);
+  const implementations = coffeeTemplate.indexOf("${implementationsMarkup}");
+  const core = coffeeTemplate.indexOf("Wissenschaftlicher Kern");
+  const evidence = coffeeTemplate.indexOf("Evidenz ${");
+  const limits = coffeeTemplate.indexOf("Bedingungen und Grenzen");
+  const exclusions = coffeeTemplate.indexOf("Was daraus nicht folgt");
+  const saveAction = coffeeTemplate.indexOf("${cardSaveMarkup}");
+  const sources = coffeeTemplate.indexOf("Geprüfte Quellen");
+  const reflection = coffeeTemplate.indexOf("Ein Gedanke zum Mitnehmen");
+  assert.ok(implementations < core && core < evidence && evidence < limits && limits < exclusions);
+  assert.ok(exclusions < saveAction && saveAction < sources && sources < reflection);
+  assert.match(coffeeTemplate, /<section class="reflection-closing"[\s\S]*Ein Gedanke zum Mitnehmen[\s\S]*<\/section>\s*<\/article>`/);
 });
 
 test("scientific foundation remains visible at the end with the approved hierarchy", () => {
@@ -130,8 +151,8 @@ test("scientific disclosure heading uses section typography and inner headings r
   assert.match(styles, /\.implementations__header > :not\(\.section-heading\)/);
 });
 
-test("the only visible personal mark is the reversible implementation collection toggle", () => {
-  assert.match(script, /data-action="toggle-implementation-saved"/);
+test("the only visible personal mark is the reversible card collection toggle", () => {
+  assert.match(script, /data-action="toggle-card-saved"/);
   assert.match(script, /Zum Ausprobieren merken/);
   for (const obsolete of ["Persönliche Markierungen", "Zur Vertiefung merken", "Zur Vertiefung vorgemerkt", "Als gelesen markieren", "Gelesen", "Ausprobiert"]) {
     assert.doesNotMatch(script, new RegExp(obsolete));
@@ -139,12 +160,20 @@ test("the only visible personal mark is the reversible implementation collection
   assert.doesNotMatch(script, /data-action="(?:toggle-read|toggle-personal-mark|complete-coffee)"/);
 });
 
-test("collection renders only saved implementations with open and remove actions", () => {
-  assert.match(script, /Du hast noch keine Umsetzung vorgemerkt\./);
+test("collection renders complete saved cards with all three implementations and open and remove actions", () => {
+  assert.match(script, /state\.savedCards\.map/);
+  assert.match(script, /normalizeImplementations\(card\)/);
+  assert.match(script, /implementations\.map\(\(implementation\) => implementationMarkup\(implementation\)\)/);
+  assert.match(script, /aria-label="Drei mögliche Umsetzungen"/);
+  assert.match(script, /Wissenschaftlicher Kontext/);
+  assert.match(script, /Du hast noch keinen EduCoffee vorgemerkt\./);
   assert.match(script, /data-action="open-collection-origin"/);
-  assert.match(script, /data-action="remove-saved-implementation"/);
+  assert.match(script, /data-action="remove-saved-card"/);
   assert.match(script, /Aus Sammlung entfernen/);
   assert.doesNotMatch(script, /Gemerkte Befunde|mehrere Statusgruppen/);
+  assert.match(databaseScript, /savedEntityType:\s*"educoffee-card"/);
+  assert.match(databaseScript, /profileId === profileId/);
+  assert.doesNotMatch(script, /migrateImplementationSavesToCards/);
 });
 
 test("daily EduCoffee contains no visible subject filter", () => {
